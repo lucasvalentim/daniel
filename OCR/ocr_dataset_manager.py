@@ -337,6 +337,10 @@ class OCRDataset(GenericDataset):
                     np.ceil(sample["img"].shape[1] / max_ratio)
                 )
                 sample["img"] = cv2.resize(sample["img"], (new_w, new_h))
+                # cv2.resize drops the trailing channel axis for grayscale
+                # images; restore it so img_shape stays 3D (H, W, C).
+                if len(sample["img"].shape) == 2:
+                    sample["img"] = np.expand_dims(sample["img"], axis=2)
 
         # Normalization if requested
         if "normalize" in self.params["config"] and self.params["config"]["normalize"]:

@@ -1,0 +1,10 @@
+# BRESSAY fine-tuning — generated/large artifacts (not for git)
+Datasets/formatted/
+outputs/
+*.pt
+*.pkl
+weights.zip
+*.aria2
+**/__pycache__/
+*.pyc
+basic/subwords/

@@ -17,6 +17,7 @@ max_nb_lines = {
     "IAM_NER": 15,
     "EXOPOPP_global":80,
     "custom_dataset": 40,
+    "bressay": 40,
 } # maximum number of lines for curriculum learning per dataset
 
 def default_dataset_config_factory(dataset_name, dataset_level='page', dataset_variant='sem', multi=False):
