@@ -16,3 +16,4 @@ editdistance
 edlib
 wandb
 Pillow==9.5.0
+PyWavelets

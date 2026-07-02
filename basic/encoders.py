@@ -87,3 +87,38 @@ class FCN_Encoder_WidtherFeature(Module):
         x = self.init_blocks(x)
         x = self.blocks(x)
         return x
+
+
+class FCN_Encoder_WidtherFeature_WT(Module):
+    """
+    Same as FCN_Encoder_WidtherFeature but the DSC blocks use WTDepthwiseConv2D
+    (wavelet branches gated by zero-init scales, cf. WTConv, ECCV 2024).
+    Parameter names and shapes of the original convs are preserved, so pretrained
+    FCN_Encoder_WidtherFeature checkpoints load unchanged (load with strict=False
+    for the new wavelet parameters) and the initial function is identical to the
+    pretrained encoder.
+    """
+    def __init__(self, params):
+        super(FCN_Encoder_WidtherFeature_WT, self).__init__()
+
+        self.dropout = params["dropout"]
+        wt_levels = params["wt_levels"] if "wt_levels" in params else 2
+        self.init_blocks = torch.nn.Sequential(*[
+            ConvBlock(params["input_channels"], 32, stride=(1, 1), dropout=self.dropout),
+            ConvBlock(32, 64, stride=(2, 2), dropout=self.dropout),
+            ConvBlock(64, 128, stride=(2, 2), dropout=self.dropout),
+            ConvBlock(128, 256, stride=(2, 2), dropout=self.dropout),
+            ConvBlock(256, 512, stride=(2, 1), dropout=self.dropout),
+            ConvBlock(512, 512, stride=(1, 1), dropout=self.dropout),
+        ])
+        self.blocks = torch.nn.Sequential(*[
+            DSCBlock(512, 512, stride=(1, 1), dropout=self.dropout, wt_levels=wt_levels),
+            DSCBlock(512, 512, stride=(1, 1), dropout=self.dropout, wt_levels=wt_levels),
+            DSCBlock(512, 512, stride=(1, 1), dropout=self.dropout, wt_levels=wt_levels),
+            DSCBlock(512, 1024, stride=(1, 1), dropout=self.dropout, wt_levels=wt_levels),
+        ])
+
+    def forward(self, x):
+        x = self.init_blocks(x)
+        x = self.blocks(x)
+        return x
