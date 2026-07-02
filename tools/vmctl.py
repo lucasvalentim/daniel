@@ -80,10 +80,12 @@ def cmd_setup(cfg):
 
     if not os.path.isdir(DATASET_DIR):
         if have_drive:
+            # stage + atomic mv: a concurrent/interrupted copy is never seen as done
             detach("pull_dataset",
                    'LOG=/content/pull_dataset.log\necho "[ds] start" > $LOG\n'
-                   'mkdir -p {r}/Datasets/formatted\n'
-                   'cp -rf {a}/bressay_page {r}/Datasets/formatted/ >> $LOG 2>&1\n'
+                   'F={r}/Datasets/formatted\nmkdir -p $F\nrm -rf $F/.stage_bressay_page\n'
+                   'cp -rf {a}/bressay_page $F/.stage_bressay_page >> $LOG 2>&1\n'
+                   'rm -rf $F/bressay_page && mv $F/.stage_bressay_page $F/bressay_page\n'
                    'echo "[ds] DATASET_DONE $(ls {d} | wc -l) imgs" >> $LOG\n'.format(r=REPO, a=ASSETS, d=DATASET_DIR))
             launched.append("dataset(drive)")
         else:
@@ -93,7 +95,9 @@ def cmd_setup(cfg):
         if have_drive and os.path.isfile(ASSETS + "/iam_weights/checkpoints/best-IAM_NER_165.pt"):
             detach("pull_weights",
                    'LOG=/content/pull_weights.log\necho "[w] start" > $LOG\n'
-                   'mkdir -p $(dirname {c})\ncp -f {a}/iam_weights/checkpoints/best-IAM_NER_165.pt {c} >> $LOG 2>&1\n'
+                   'mkdir -p $(dirname {c})\n'
+                   'cp -f {a}/iam_weights/checkpoints/best-IAM_NER_165.pt {c}.tmp >> $LOG 2>&1\n'
+                   'mv -f {c}.tmp {c}\n'
                    'echo "[w] WEIGHTS_DONE" >> $LOG\n'.format(c=IAM_CKPT, a=ASSETS))
             launched.append("weights(drive)")
         else:
@@ -101,25 +105,31 @@ def cmd_setup(cfg):
                 f.write("import zipfile\n"
                         "z = zipfile.ZipFile('/content/weights.zip')\n"
                         "pref = 'daniel_iam_ner_strategy_A_custom_split/'\n"
-                        "z.extractall('{}/outputs', [m for m in z.namelist() if m.startswith(pref)])\n"
-                        "print('EXTRACTED')\n".format(REPO))
+                        "z.extractall('/content/w_stage', [m for m in z.namelist() if m.startswith(pref)])\n"
+                        "print('EXTRACTED')\n")
             detach("pull_weights",
                    'LOG=/content/pull_weights.log\necho "[w] zenodo start" > $LOG\n'
                    'which aria2c >/dev/null || (apt-get update -q && apt-get install -y -q aria2) >> $LOG 2>&1\n'
-                   'cd /content && rm -f weights.zip weights.zip.aria2\n'
+                   'cd /content && rm -f weights.zip weights.zip.aria2 && rm -rf /content/w_stage\n'
                    'aria2c -x16 -s16 -k1M --console-log-level=warn --summary-interval=30 '
                    '--file-allocation=none -o weights.zip "{u}" >> $LOG 2>&1\n'
                    'python3 /content/extract_w.py >> $LOG 2>&1\nrm -f /content/weights.zip\n'
-                   'echo "[w] WEIGHTS_DONE" >> $LOG\n'.format(u=WEIGHTS_URL))
+                   'mkdir -p {r}/outputs && rm -rf {r}/outputs/daniel_iam_ner_strategy_A_custom_split\n'
+                   'mv /content/w_stage/daniel_iam_ner_strategy_A_custom_split {r}/outputs/\n'
+                   'echo "[w] WEIGHTS_DONE" >> $LOG\n'.format(u=WEIGHTS_URL, r=REPO))
             launched.append("weights(zenodo)")
 
     if not os.path.isdir(TOKENIZER_DIR):
-        src = ('cp -rf {a}/subwords/tokenizer-daniel {r}/basic/subwords/ >> $LOG 2>&1\n'
-               'cp -f {a}/subwords/replace_dict.pkl {r}/basic/subwords/ >> $LOG 2>&1\n'.format(a=ASSETS, r=REPO)
+        src = ('rm -rf {r}/basic/subwords/.stage_tk\n'
+               'cp -rf {a}/subwords/tokenizer-daniel {r}/basic/subwords/.stage_tk >> $LOG 2>&1\n'
+               'rm -rf {t} && mv {r}/basic/subwords/.stage_tk {t}\n'
+               'cp -f {a}/subwords/replace_dict.pkl {r}/basic/subwords/ >> $LOG 2>&1\n'.format(a=ASSETS, r=REPO, t=TOKENIZER_DIR)
                if have_drive and os.path.isdir(ASSETS + "/subwords/tokenizer-daniel") else
                'cd {r} && wget -q -O subwords.zip "{u}" >> $LOG 2>&1\n'
-               'cd {r} && python3 -c "import zipfile; zipfile.ZipFile(\'subwords.zip\').extractall(\'basic\')" >> $LOG 2>&1\n'
-               'rm -f {r}/subwords.zip\n'.format(r=REPO, u=TOKENIZER_URL))
+               'rm -rf /content/tk_stage\n'
+               'cd {r} && python3 -c "import zipfile; zipfile.ZipFile(\'subwords.zip\').extractall(\'/content/tk_stage\')" >> $LOG 2>&1\n'
+               'rm -f {r}/subwords.zip\n'
+               'cp -rf /content/tk_stage/subwords/. {r}/basic/subwords/ >> $LOG 2>&1\n'.format(r=REPO, u=TOKENIZER_URL))
         detach("pull_tokenizer",
                'LOG=/content/pull_tokenizer.log\necho "[tk] start" > $LOG\nmkdir -p {r}/basic/subwords\n'.format(r=REPO)
                + src + 'echo "[tk] TOKENIZER_DONE" >> $LOG\n')

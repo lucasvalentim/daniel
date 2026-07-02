@@ -44,11 +44,19 @@ EXPERIMENTS = {
 
 
 def run(cmd, timeout=300):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    return r.returncode, (r.stdout or ""), (r.stderr or "")
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stdout or ""), (r.stderr or "")
+    except subprocess.TimeoutExpired as e:
+        # colab exec occasionally wedges on websocket blips / busy kernels;
+        # report as a normal failure so the caller's retry loop handles it
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode(errors="replace")
+        return 124, out, "(timeout após {}s)".format(timeout)
 
 
-def vm(session, command, cfg, timeout=300, retries=3):
+def vm(session, command, cfg, timeout=180, retries=4, fatal=True):
     """Ship vmctl.py + dispatch(command, cfg) to the VM; parse the JSON line."""
     src = open(VMCTL).read()
     payload = src + "\n\ndispatch({!r}, json.loads({!r}))\n".format(command, json.dumps(cfg))
@@ -62,10 +70,14 @@ def vm(session, command, cfg, timeout=300, retries=3):
             if m:
                 return json.loads(m.group(1))
             if attempt < retries:
-                print("   (vm call '{}' tentativa {} falhou; retry em 8s)".format(command, attempt))
+                print("   (vm call '{}' tentativa {}/{} falhou; retry em 8s)".format(command, attempt, retries))
                 time.sleep(8)
-        sys.exit("ERRO: vm call '{}' falhou apos {} tentativas:\n{}".format(
-            command, retries, (out + err).strip()[-600:]))
+        if not fatal:
+            return None
+        sys.exit("ERRO: vm call '{}' falhou após {} tentativas:\n{}\n"
+                 "Dicas: o 'up' é idempotente (re-rode); se persistir, o kernel pode estar\n"
+                 "preso — tente 'colab restart-kernel -s {}' e re-rode o comando.".format(
+                     command, retries, (out + err).strip()[-400:], session))
     finally:
         os.unlink(tmp)
 
@@ -115,8 +127,19 @@ def cmd_up(args, exp):
     header("[4/6] Assets + venv (detached)")
     s = vm(args.session, "setup", {})
     print("   lançado: " + ", ".join(s["launched"]))
+    misses = 0
     while True:
-        st = vm(args.session, "setup_status", {})
+        st = vm(args.session, "setup_status", {}, timeout=120, retries=1, fatal=False)
+        if st is None:
+            misses += 1
+            if misses >= 10:
+                sys.exit("ERRO: VM sem responder ao polling há muito tempo.\n"
+                         "O setup continua detached na VM; re-rode o 'up' (idempotente) ou\n"
+                         "tente 'colab restart-kernel -s {}'.".format(args.session))
+            print("   (VM ocupada — I/O do Drive costuma causar isso; de novo em 25s)", flush=True)
+            time.sleep(25)
+            continue
+        misses = 0
         flags = " ".join("{}={}".format(k, "OK" if v else "...")
                          for k, v in st.items() if k not in ("ready", "logs"))
         print("   " + flags, flush=True)
