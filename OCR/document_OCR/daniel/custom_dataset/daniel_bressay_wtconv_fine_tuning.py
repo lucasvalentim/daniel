@@ -123,9 +123,11 @@ def main(mode):
     if params["training_params"].get("use_wandb", False):
         init_wandb(projet_name="daniel", exp_id='bressay-wtconv-fine-tuning', params=params, dataset_name=dataset_name)
 
-    run(params, mode=mode, dataset_names=[dataset_name])
-    # for evaluation:
-    # run(params, mode=mode, dataset_names=[dataset_name], metrics=["cer", "wer"], set_names=["test"])
+    if mode == "eval":
+        # set_names must be a list (the default ("test") is a bare string)
+        run(params, mode=mode, dataset_names=[dataset_name], metrics=["cer", "wer"], set_names=["test"])
+    else:
+        run(params, mode=mode, dataset_names=[dataset_name])
 
 
 if __name__ == "__main__":
